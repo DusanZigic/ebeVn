@@ -20,7 +20,7 @@ private:
     std::string m_method;
     std::string m_pName;
     std::string m_centrality;
-    std::string m_xB;
+    double m_xB;
     std::vector<int> m_filter;
 
     size_t m_eventN;
