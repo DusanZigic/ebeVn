@@ -94,8 +94,18 @@ void ebeVn::run()
 
     if (m_method == "SP") {
         std::vector<double> RAA; std::map<unsigned int, std::vector<double>> Vn;
-        if (     generateVnSP(RAA, Vn) != 1) return;
+        if (    calculateVnSP(RAA, Vn) != 1) return;
         if (exportObservables(RAA, Vn) != 1) return;
+    }
+    else if (m_method == "EP") {
+        std::vector<double> RAA; std::map<unsigned int, std::vector<double>> Vn;
+        if (    calculateVnEP(RAA, Vn) != 1) return;
+        if (exportObservables(RAA, Vn) != 1) return;
+    }
+    else if (m_method == "C") {
+        std::vector<double> RAA; std::map<unsigned int, std::vector<double>> Vn2, Vn4;
+        if (     calculateVnC(RAA, Vn2, Vn4) != 1) return;
+        if (exportObservables(RAA, Vn2, Vn4) != 1) return;
     }
 }
 
@@ -147,6 +157,8 @@ int ebeVn::loadQnVectors()
                 m_Psin[eventID][n] = 1.0/static_cast<double>(n)*std::atan2(m_normedQn[eventID][n].imag(), m_normedQn[eventID][n].real());
         }
     }
+
+    return 1;
 }
 
 int ebeVn::setGrids()
@@ -199,13 +211,13 @@ int ebeVn::setGaussQuadrature()
         if (line.at(0) == '#')
             continue;
         std::stringstream ss(line);
-        ss >> buffer; m_gaussQuadPts["phi"].push_back(buffer);
-        ss >> buffer; m_gaussQuadPts["weights"].push_back(buffer);
+        ss >> buffer; m_gaussQuadPts.at("phi").push_back(buffer);
+        ss >> buffer; m_gaussQuadPts.at("weights").push_back(buffer);
     }    
 
     file_in.close();
 
-    if (m_gaussQuadPts["phi"].size() != m_phiGrid.size()) {
+    if (m_gaussQuadPts.at("phi").size() != m_phiGrid.size()) {
         std::cerr << "Error: Gaussian quadrature phi points and phi grids are not the same size. Aborting..." << std::endl;
         return -2;
     }
@@ -213,7 +225,7 @@ int ebeVn::setGaussQuadrature()
     return 1;
 }
 
-int ebeVn::loadRAADist(int eventID, std::vector<std::vector<double>> &RAADist)
+int ebeVn::loadRAADist(size_t eventID, std::vector<std::vector<double>> &RAADist) const
 {
 	std::stringstream xBsstr; xBsstr << std::fixed << std::setprecision(1) << m_xB;
     std::string path_in  = "../results/results" + m_pName + "/";
@@ -255,30 +267,417 @@ void ebeVn::integrateRAASP(const std::vector<std::vector<double>> &RAADist, std:
 {
     std::vector<double> norm(m_pTGrid.size(), 0.0);
 	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
-		for (size_t iphi=0; iphi<m_gaussQuadPts["phi"].size(); iphi++)
-			norm[ipT] += m_gaussQuadPts["weights"][iphi]*RAADist[ipT][iphi];
+		for (size_t iphi=0; iphi<m_gaussQuadPts.at("phi").size(); iphi++)
+			norm[ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi];
 
 	RAA.resize(m_pTGrid.size(), 0.0);
 	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
 		RAA[ipT] = norm[ipT]/2.0/M_PI;
     
     for (const auto &n : m_nList) {
-        qn[n] = std::vector<std::complex<double>>(m_pTGrid.size(), 0.0);
+        qn[n] = std::vector<std::complex<double>>(m_pTGrid.size(), std::complex<double>{0.0, 0.0});
         for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
-		    for (size_t iphi=0; iphi<m_gaussQuadPts["phi"].size(); iphi++) {
-                qn[n][ipT] += m_gaussQuadPts["weights"][iphi]*RAADist[ipT][iphi]*std::exp(std::complex<double>{0.0, static_cast<double>(n)*m_phiGrid[iphi]});
+		    for (size_t iphi=0; iphi<m_gaussQuadPts.at("phi").size(); iphi++) {
+                qn[n][ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi]*std::exp(std::complex<double>{0.0, static_cast<double>(n)*m_phiGrid[iphi]});
             }
             qn[n][ipT] /= norm[ipT];
         }
     }
 }
 
-int ebeVn::generateVnSP(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn)
+int ebeVn::calculateVnSP(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn)
 {
+    RAA.resize(m_pTGrid.size(), 0.0);
+    for (const auto &n : m_nList)
+        Vn[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+
+    std::map<unsigned int, std::vector<double>> Qqn;
+    std::map<unsigned int, double> QQn;
+    for (const auto &n : m_nList) {
+        Qqn[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+        QQn[n] = 0.0;
+    }    
+ 
+    size_t filterEventN = 0;
+
+    for (const auto & Qn : m_normedQn) {
+        size_t eventID = Qn.first;
+        
+        bool skipEvent = false;
+		for (const auto &f: m_filter) {
+            if (std::abs(m_Qn[eventID][2*f]) > std::abs(m_Qn[eventID][f])) {
+                skipEvent = true;
+            }
+        }
+		if (skipEvent)
+            continue;
+        
+        filterEventN++;
+
+        std::vector<std::vector<double>> RAADist;
+        if (loadRAADist(eventID, RAADist) != 1) return -1;
+
+		std::vector<double> raa; std::map<unsigned int, std::vector<std::complex<double>>> qn;
+        integrateRAASP(RAADist, raa, qn);
+
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			RAA[ipT] += raa[ipT];
+			for (const auto &n : m_nList)
+				Qqn[n][ipT] += std::real(qn[n][ipT]*std::conj(m_normedQn[eventID][n]));
+		}
+
+		for (const auto &n : m_nList)
+			QQn[n] += std::real(m_normedQn[eventID][n]*std::conj(m_normedQn[eventID][n]));
+    }
+
+    for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+	{
+		RAA[ipT] /= static_cast<double>(filterEventN);
+		for (const auto &n : m_nList)
+			Vn[n][ipT] = std::real(Qqn[n][ipT])/static_cast<double>(filterEventN) / std::sqrt(QQn[n]/static_cast<double>(filterEventN));
+	}
+
     return 1;
 }
 
-int ebeVn::exportObservables(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn)
+
+void ebeVn::integrateRAAEP(size_t eventID, const std::vector<std::vector<double>> &RAADist, std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &vn)
 {
+    std::vector<double> norm(m_pTGrid.size(), 0.0);
+	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+		for (size_t iphi=0; iphi<m_phiGrid.size(); iphi++)
+			norm[ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi];
+
+    RAA.resize(m_pTGrid.size(), 0.0);
+	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+		RAA[ipT] = norm[ipT]/2.0/M_PI;
+
+	for (const auto &n : m_nList) {
+		vn[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			for (size_t iphi=0; iphi<m_gaussQuadPts.at("phi").size(); iphi++)
+				vn[n][ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi]*std::cos(static_cast<double>(n)*(m_gaussQuadPts.at("phi")[iphi] - m_Psin[eventID][n]));
+
+			vn[n][ipT] /= norm[ipT];
+		}
+	}
+}
+
+int ebeVn::calculateVnEP(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn)
+{
+    RAA.resize(m_pTGrid.size(), 0.0);
+    for (const auto &n : m_nList)
+        Vn[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+    
+    size_t filterEventN = 0;
+
+    for (const auto & Psin : m_Psin) {
+        size_t eventID = Psin.first;
+        
+        bool skipEvent = false;
+		for (const auto &f: m_filter) {
+            if (std::abs(m_Qn[eventID][2*f]) > std::abs(m_Qn[eventID][f])) {
+                skipEvent = true;
+            }
+        }
+		if (skipEvent)
+            continue;
+        
+        filterEventN++;
+
+        std::vector<std::vector<double>> RAADist;
+        if (loadRAADist(eventID, RAADist) != 1) return -1;
+
+        std::vector<double> raa; std::map<unsigned int, std::vector<double>> vn;
+        integrateRAAEP(eventID, RAADist, raa, vn);
+
+        for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+            RAA[ipT] += raa[ipT];
+            for (const auto &n : m_nList)
+                Vn[n][ipT] += vn[n][ipT];
+        }
+    }
+
+    for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+        RAA[ipT] /= static_cast<double>(filterEventN);
+        for (const auto &n : m_nList)
+            Vn[n][ipT] /= static_cast<double>(filterEventN);
+    }
+
     return 1;
+}
+
+int ebeVn::exportObservables(const std::vector<double> &RAA, const std::map<unsigned int, std::vector<double>> &Vn) const
+{
+    std::stringstream xBsstr; xBsstr << std::fixed << std::setprecision(1) << m_xB;
+
+	std::string path_out  = "../results/results" + m_pName + "/";
+	            path_out += m_pName + "_" + m_collsys + "_sNN=" + m_sNN + "_cent=" + m_centrality + "_xB=" + xBsstr.str();
+
+	if      (m_method == "SP") path_out += "_SP";
+	else if (m_method == "EP") path_out += "_EP";
+
+	if (m_filter.size() > 0) {
+		path_out += "_F";
+        for (const auto &f : m_filter)
+            path_out = path_out + std::to_string(f);
+	}
+
+	path_out += ".dat";
+
+	std::ofstream file_out(path_out, std::ios_base::out);
+	if (!file_out.is_open()) {
+		std::cerr << "Error: unable top open output file. Aborting..." << std::endl;
+		return -1;
+	}
+
+    file_out << "#";
+    file_out << std::fixed << std::setw(13) << "pT [GeV]" << " ";
+    file_out << std::fixed << std::setw(13) <<     "R_AA" << " ";
+	if (m_method == "SP") {
+		for (const auto &n : m_nList) {
+            std::string vnStr = "v_" + std::to_string(n) + "{SP}";
+            file_out << std::fixed << std::setw(13) << vnStr << " ";
+        }
+	}
+	else if (m_method == "EP") {
+		for (const auto &n : m_nList) {
+            std::string vnStr = "v_" + std::to_string(n) + "{EP}";
+            file_out << std::fixed << std::setw(13) << vnStr << " ";
+        }
+	}
+    file_out << "\n";
+
+	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+		file_out << std::fixed << std::setw(14) << std::setprecision(10) << m_pTGrid[ipT] << " ";
+		file_out << std::fixed << std::setw(13) << std::setprecision(10) << 	 RAA[ipT] << " ";
+		for (const auto &n : m_nList)
+		    file_out << std::fixed << std::setw(13) << std::setprecision(10) <<  Vn.at(n)[ipT] << " ";
+		file_out << "\n";
+	}
+
+	return 1;
+}
+
+
+void ebeVn::integrateRAAC(const std::vector<std::vector<double>> &RAADist, std::vector<double> &mq, std::map<unsigned int, std::vector<std::complex<double>>> &qn)
+{
+    mq.resize(m_pTGrid.size(), 0.0);
+	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+		for (size_t iphi=0; iphi<m_gaussQuadPts.at("phi").size(); iphi++)
+			mq[ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi];
+
+	for (const auto &n : m_nList) {
+		qn[n] = std::vector<std::complex<double>>(m_pTGrid.size(), std::complex<double>{0.0, 0.0});
+
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			for (size_t iphi=0; iphi<m_gaussQuadPts.at("phi").size(); iphi++)
+				qn[n][ipT] += m_gaussQuadPts.at("weights")[iphi]*RAADist[ipT][iphi]*std::exp(std::complex<double>{0.0, static_cast<double>(n)*m_phiGrid[iphi]});
+		}
+	}
+}
+
+void ebeVn::softCummulants(std::map<unsigned int, double> &c2, std::map<unsigned int, double> &C2, std::map<unsigned int, double> &c4, std::map<unsigned int, double> &C4)
+{
+    //legend: c2 = <<2>>, C2 = c_n{2}, c4 = <<4>>, C4 = c_n{4}
+
+	std::map<unsigned int, double>  twoParticleCummulantSum; double  twoParticleCummulantNorm = 0.0;
+	std::map<unsigned int, double> fourParticleCummulantSum; double fourParticleCummulantNorm = 0.0;
+
+    for (unsigned int n=2; n<=4; n++) {
+         twoParticleCummulantSum[n] = 0.0;
+        fourParticleCummulantSum[n] = 0.0;
+    }
+
+    size_t filterEventN = 0;
+
+	for (const auto & Qn : m_Qn) {
+        size_t eventID = Qn.first;
+        
+        bool skipEvent = false;
+		for (const auto &f: m_filter) {
+            if (std::abs(m_Qn[eventID][2*f]) > std::abs(m_Qn[eventID][f])) {
+                skipEvent = true;
+            }
+        }
+		if (skipEvent)
+            continue;
+        
+        filterEventN++;
+
+		double W2 = m_M[eventID]*(m_M[eventID]-1.0);
+		double W4 = m_M[eventID]*(m_M[eventID]-1.0)*(m_M[eventID]-2.0)*(m_M[eventID]-3.0);
+
+		for (unsigned int n=2; n<=4; n++) {
+		     twoParticleCummulantSum[n] += ((std::pow(std::abs(m_Qn[eventID][n]), 2.0) - m_M[eventID])/W2) * W2;
+		    fourParticleCummulantSum[n] += ((std::pow(std::abs(m_Qn[eventID][n]), 4.0) + std::pow(std::abs(m_Qn[eventID][2*n]), 2.0) - 
+                                                2.0*std::real(m_Qn[eventID][2*n]*std::conj(m_Qn[eventID][n])*std::conj(m_Qn[eventID][n])))/W4 -
+                                            2.0*(2.0*(m_M[eventID]-2.0)*std::pow(std::abs(m_Qn[eventID][n]), 2.0) -
+                                                m_M[eventID]*(m_M[eventID]-3.0))/W4) * W4;
+		}
+
+		 twoParticleCummulantNorm += W2;
+        fourParticleCummulantNorm += W4;
+	}
+
+	for (unsigned int n=2; n<=4; n++) {
+		c2[n] =  twoParticleCummulantSum[n]/ twoParticleCummulantNorm;
+        c4[n] = fourParticleCummulantSum[n]/fourParticleCummulantNorm;
+	}
+
+	for (unsigned int n=2; n<=4; n++) {
+		C2[n] = c2[n];
+		C4[n] = c4[n] - 2.0*c2[n]*c2[n];
+	}
+}
+
+int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &d2, std::map<unsigned int, std::vector<double>> &d4)
+{
+	//legend: d2 = <2'>, D2 = d_n{2}, d4 = <4'>, D4 = d_n{4}
+
+    std::map<unsigned int, std::vector<double>>  twoParticleCummulantSum; std::vector<double>  twoParticleCummulantNorm(m_pTGrid.size(), 0.0);
+	std::map<unsigned int, std::vector<double>> fourParticleCummulantSum; std::vector<double> fourParticleCummulantNorm(m_pTGrid.size(), 0.0);
+
+    for (unsigned int n=2; n<=4; n++) {
+         twoParticleCummulantSum[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+        fourParticleCummulantSum[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+    }
+
+	size_t filterEventN = 0;
+
+	for (const auto & Qn : m_Qn) {
+		size_t eventID = Qn.first;
+        
+        bool skipEvent = false;
+		for (const auto &f: m_filter) {
+            if (std::abs(m_Qn[eventID][2*f]) > std::abs(m_Qn[eventID][f])) {
+                skipEvent = true;
+            }
+        }
+		if (skipEvent)
+            continue;
+        
+        filterEventN++;
+
+        std::vector<std::vector<double>> RAADist;
+        if (loadRAADist(eventID, RAADist) != 1) return -1;
+
+        std::vector<double> mq; std::map<unsigned int, std::vector<std::complex<double>>> qn;
+        integrateRAAC(RAADist, mq, qn);
+
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+            RAA[ipT] += (mq[ipT]/2.0/M_PI);
+
+		std::vector<double> W2(m_pTGrid.size(), 0.0), W4(m_pTGrid.size(), 0.0);
+
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			W2[ipT] = mq[ipT]*m_M[eventID];
+			W4[ipT] = mq[ipT]*m_M[eventID]*(m_M[eventID]-1.0)*(m_M[eventID]-2.0);
+			
+			for (unsigned int n=2; n<=4; n++) {
+				 twoParticleCummulantSum[n][ipT] += std::real(qn[n][ipT]*std::conj(m_Qn[eventID][n])/W2[ipT]) * W2[ipT];
+				fourParticleCummulantSum[n][ipT] += std::real(qn[n][ipT]*(m_Qn[eventID][n]*std::conj(m_Qn[eventID][n])*std::conj(m_Qn[eventID][n]) -
+                                                                            m_Qn[eventID][n]*std::conj(m_Qn[eventID][2*n]) -
+														                    2.0*m_M[eventID]*std::conj(m_Qn[eventID][n]) + 2.0*std::conj(m_Qn[eventID][n]))/W4[ipT])*W4[ipT];
+			}
+
+			 twoParticleCummulantNorm[ipT] += W2[ipT];
+            fourParticleCummulantNorm[ipT] += W4[ipT];
+		}
+	}
+
+	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
+        RAA[ipT] /= static_cast<double>(filterEventN);
+
+	for (unsigned int n=2; n<=4; n++) {
+        d2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+        d4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			d2[n][ipT] =  twoParticleCummulantSum[n][ipT]/ twoParticleCummulantNorm[ipT];
+			d4[n][ipT] = fourParticleCummulantSum[n][ipT]/fourParticleCummulantNorm[ipT];
+		}
+    }
+
+    return 1;
+}
+
+int ebeVn::calculateVnC(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn2, std::map<unsigned int, std::vector<double>> &Vn4)
+{
+    // legend: c2 = <<2>>, C2 = c_n{2}, c4 = <<4>>, C4 = c_n{4}
+	std::map<unsigned int, double> c2, C2, c4, C4;
+	softCummulants(c2, C2, c4, C4);
+
+    // legend: d2 = <2'>,   d4 = <4'>
+	std::map<unsigned int, std::vector<double>> d2, d4;
+	if (hardCummulants(RAA, d2, d4) != 1) return -1;
+
+    // legend: //D2 = d_n{2}, D4 = d_n{4}
+	std::map<unsigned int, std::vector<double>> D2, D4;
+	for (unsigned int n=2; n<=4; n++) {
+        D2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+        D4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			D2[n][ipT] = d2[n][ipT];
+			D4[n][ipT] = d4[n][ipT] - 2.0*d2[n][ipT]*c2[n];
+		}
+	}
+
+	for (unsigned int n=2; n<=4; n++) {
+        Vn2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+        Vn4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
+		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+			Vn2[n][ipT] =      D2[n][ipT]/std::pow(     C2[n], 1.0/2.0);
+			Vn4[n][ipT] = -1.0*D4[n][ipT]/std::pow(-1.0*C4[n], 3.0/4.0);
+		}
+	}
+
+	return 1;
+}
+
+int ebeVn::exportObservables(const std::vector<double> &RAA, const std::map<unsigned int, std::vector<double>> &Vn2, const std::map<unsigned int, std::vector<double>> &Vn4) const
+{
+    std::stringstream xBsstr; xBsstr << std::fixed << std::setprecision(1) << m_xB;
+
+	std::string path_out  = "../results/results" + m_pName + "/";
+	            path_out += m_pName + "_" + m_collsys + "_sNN=" + m_sNN + "_cent=" + m_centrality + "_xB=" + xBsstr.str() + "_C";
+	
+    if (m_filter.size() > 0) {
+		path_out += "_F";
+        for (const auto &f : m_filter)
+            path_out = path_out + std::to_string(f);
+	}
+
+	path_out += ".dat";
+
+	std::ofstream file_out(path_out, std::ios_base::out);
+	if (!file_out.is_open()) {
+		std::cerr << "Error: unable top open output file. Aborting..." << std::endl;
+		return -1;
+	}
+
+    file_out << "#";
+    file_out << std::fixed << std::setw(13) << "pT [GeV]" << " ";
+    file_out << std::fixed << std::setw(13) <<     "R_AA" << " ";
+    for (unsigned int n=2; n<=4; n++) {
+        std::string vnStr;
+        vnStr = "v_" + std::to_string(n) + "{2}";
+        file_out << std::fixed << std::setw(13) << vnStr << " ";
+        vnStr = "v_" + std::to_string(n) + "{4}";
+        file_out << std::fixed << std::setw(13) << vnStr << " ";
+    }
+
+    for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
+		file_out << std::fixed << std::setw(14) << std::setprecision(10) << m_pTGrid[ipT] << " ";
+		file_out << std::fixed << std::setw(13) << std::setprecision(10) << 	 RAA[ipT] << " ";
+		for (unsigned int n=2; n<=4; n++) {
+		    file_out << std::fixed << std::setw(13) << std::setprecision(10) <<  Vn2.at(n)[ipT] << " ";
+            file_out << std::fixed << std::setw(13) << std::setprecision(10) <<  Vn4.at(n)[ipT] << " ";
+        }
+		file_out << "\n";
+	}
+
+	file_out.close();
+
+	return 1;
 }
