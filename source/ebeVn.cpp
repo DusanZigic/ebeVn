@@ -546,6 +546,8 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
 
 	size_t filterEventN = 0;
 
+    RAA.resize(m_pTGrid.size(), 0.0);
+
 	for (const auto & Qn : m_Qn) {
 		size_t eventID = Qn.first;
         
@@ -565,6 +567,7 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
 
         std::vector<double> mq; std::map<unsigned int, std::vector<std::complex<double>>> qn;
         integrateRAAC(RAADist, mq, qn);
+
 
 		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
             RAA[ipT] += (mq[ipT]/2.0/M_PI);
@@ -631,7 +634,7 @@ int ebeVn::calculateVnC(std::vector<double> &RAA, std::map<unsigned int, std::ve
 			Vn4[n][ipT] = -1.0*D4[n][ipT]/std::pow(-1.0*C4[n], 3.0/4.0);
 		}
 	}
-
+    
 	return 1;
 }
 
