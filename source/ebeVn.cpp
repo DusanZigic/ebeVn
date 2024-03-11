@@ -669,6 +669,7 @@ int ebeVn::exportObservables(const std::vector<double> &RAA, const std::map<unsi
         vnStr = "v_" + std::to_string(n) + "{4}";
         file_out << std::fixed << std::setw(13) << vnStr << " ";
     }
+    file_out << "\n";
 
     for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
 		file_out << std::fixed << std::setw(14) << std::setprecision(10) << m_pTGrid[ipT] << " ";
