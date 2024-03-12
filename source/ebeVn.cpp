@@ -134,7 +134,13 @@ int ebeVn::loadQnVectors()
 				if(std::find(m_nList.begin(), m_nList.end(), 2*n) == m_nList.end()) continue;
 				m_nListCummulants.push_back(n);
 			}
-			continue;
+            std::vector<unsigned int> intersection(std::max(m_nListCummulants.size(), m_filter.size()));
+            std::vector<unsigned int>::iterator it = std::set_intersection(m_nListCummulants.begin(), m_nListCummulants.end(),
+                                                                           m_filter.begin(),          m_filter.end(),
+                                                                           intersection.begin());
+			intersection.resize(it-intersection.begin());
+            m_filter.assign(intersection.begin(), intersection.end());
+            continue;
         }
 
 		std::stringstream ss(line);
