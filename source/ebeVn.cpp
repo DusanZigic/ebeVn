@@ -88,6 +88,8 @@ ebeVn::~ebeVn() {}
 
 void ebeVn::run()
 {
+    if (m_error) return;
+
     if (loadQnVectors()      != 1) return;
     if (setGrids()           != 1) return;
     if (setGaussQuadrature() != 1) return;
