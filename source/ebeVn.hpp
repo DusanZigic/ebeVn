@@ -21,7 +21,7 @@ private:
     std::string m_pName;
     std::string m_centrality;
     double m_xB;
-    std::vector<int> m_filter;
+    std::vector<unsigned int> m_filter;
 
     size_t m_eventN;
     std::map<size_t, double> m_M;
