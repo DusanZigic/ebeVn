@@ -129,6 +129,11 @@ int ebeVn::loadQnVectors()
             }
             std::sort(m_nList.begin(), m_nList.end());
             m_nList.erase(std::unique(m_nList.begin(), m_nList.end()), m_nList.end());
+            for (const auto &n : m_nList) {
+				if (n == 1) continue;
+				if(std::find(m_nList.begin(), m_nList.end(), 2*n) == m_nList.end()) continue;
+				m_nListCummulants.push_back(n);
+			}
 			continue;
         }
 
@@ -485,7 +490,7 @@ void ebeVn::softCummulants(std::map<unsigned int, double> &c2, std::map<unsigned
 	std::map<unsigned int, double>  twoParticleCummulantSum; double  twoParticleCummulantNorm = 0.0;
 	std::map<unsigned int, double> fourParticleCummulantSum; double fourParticleCummulantNorm = 0.0;
 
-    for (unsigned int n=2; n<=4; n++) {
+    for (const auto& n : m_nListCummulants) {
          twoParticleCummulantSum[n] = 0.0;
         fourParticleCummulantSum[n] = 0.0;
     }
@@ -509,7 +514,7 @@ void ebeVn::softCummulants(std::map<unsigned int, double> &c2, std::map<unsigned
 		double W2 = m_M[eventID]*(m_M[eventID]-1.0);
 		double W4 = m_M[eventID]*(m_M[eventID]-1.0)*(m_M[eventID]-2.0)*(m_M[eventID]-3.0);
 
-		for (unsigned int n=2; n<=4; n++) {
+		for (const auto& n : m_nListCummulants) {
 		     twoParticleCummulantSum[n] += ((std::pow(std::abs(m_Qn[eventID][n]), 2.0) - m_M[eventID])/W2) * W2;
 		    fourParticleCummulantSum[n] += ((std::pow(std::abs(m_Qn[eventID][n]), 4.0) + std::pow(std::abs(m_Qn[eventID][2*n]), 2.0) - 
                                                 2.0*std::real(m_Qn[eventID][2*n]*std::conj(m_Qn[eventID][n])*std::conj(m_Qn[eventID][n])))/W4 -
@@ -521,12 +526,12 @@ void ebeVn::softCummulants(std::map<unsigned int, double> &c2, std::map<unsigned
         fourParticleCummulantNorm += W4;
 	}
 
-	for (unsigned int n=2; n<=4; n++) {
+	for (const auto& n : m_nListCummulants) {
 		c2[n] =  twoParticleCummulantSum[n]/ twoParticleCummulantNorm;
         c4[n] = fourParticleCummulantSum[n]/fourParticleCummulantNorm;
 	}
 
-	for (unsigned int n=2; n<=4; n++) {
+	for (const auto& n : m_nListCummulants) {
 		C2[n] = c2[n];
 		C4[n] = c4[n] - 2.0*c2[n]*c2[n];
 	}
@@ -539,7 +544,7 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
     std::map<unsigned int, std::vector<double>>  twoParticleCummulantSum; std::vector<double>  twoParticleCummulantNorm(m_pTGrid.size(), 0.0);
 	std::map<unsigned int, std::vector<double>> fourParticleCummulantSum; std::vector<double> fourParticleCummulantNorm(m_pTGrid.size(), 0.0);
 
-    for (unsigned int n=2; n<=4; n++) {
+    for (const auto& n : m_nListCummulants) {
          twoParticleCummulantSum[n] = std::vector<double>(m_pTGrid.size(), 0.0);
         fourParticleCummulantSum[n] = std::vector<double>(m_pTGrid.size(), 0.0);
     }
@@ -578,7 +583,7 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
 			W2[ipT] = mq[ipT]*m_M[eventID];
 			W4[ipT] = mq[ipT]*m_M[eventID]*(m_M[eventID]-1.0)*(m_M[eventID]-2.0);
 			
-			for (unsigned int n=2; n<=4; n++) {
+			for (const auto& n : m_nListCummulants) {
 				 twoParticleCummulantSum[n][ipT] += std::real(qn[n][ipT]*std::conj(m_Qn[eventID][n])/W2[ipT]) * W2[ipT];
 				fourParticleCummulantSum[n][ipT] += std::real(qn[n][ipT]*(m_Qn[eventID][n]*std::conj(m_Qn[eventID][n])*std::conj(m_Qn[eventID][n]) -
                                                                             m_Qn[eventID][n]*std::conj(m_Qn[eventID][2*n]) -
@@ -593,7 +598,7 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
 	for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++)
         RAA[ipT] /= static_cast<double>(filterEventN);
 
-	for (unsigned int n=2; n<=4; n++) {
+	for (const auto& n : m_nListCummulants) {
         d2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
         d4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
 		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
@@ -607,17 +612,21 @@ int ebeVn::hardCummulants(std::vector<double> &RAA, std::map<unsigned int, std::
 
 int ebeVn::calculateVnC(std::vector<double> &RAA, std::map<unsigned int, std::vector<double>> &Vn2, std::map<unsigned int, std::vector<double>> &Vn4)
 {
+    if (m_nListCummulants.empty()) {
+        std::cerr << "Error: there are no appropriate Qn vectors to calculate cummulants. Aborting..." << std::endl;
+        return -1;
+    }
     // legend: c2 = <<2>>, C2 = c_n{2}, c4 = <<4>>, C4 = c_n{4}
 	std::map<unsigned int, double> c2, C2, c4, C4;
 	softCummulants(c2, C2, c4, C4);
 
     // legend: d2 = <2'>,   d4 = <4'>
 	std::map<unsigned int, std::vector<double>> d2, d4;
-	if (hardCummulants(RAA, d2, d4) != 1) return -1;
+	if (hardCummulants(RAA, d2, d4) != 1) return -2;
 
     // legend: //D2 = d_n{2}, D4 = d_n{4}
 	std::map<unsigned int, std::vector<double>> D2, D4;
-	for (unsigned int n=2; n<=4; n++) {
+	for (const auto& n : m_nListCummulants) {
         D2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
         D4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
 		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
@@ -626,7 +635,7 @@ int ebeVn::calculateVnC(std::vector<double> &RAA, std::map<unsigned int, std::ve
 		}
 	}
 
-	for (unsigned int n=2; n<=4; n++) {
+	for (const auto& n : m_nListCummulants) {
         Vn2[n] = std::vector<double>(m_pTGrid.size(), 0.0);
         Vn4[n] = std::vector<double>(m_pTGrid.size(), 0.0);
 		for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
@@ -662,7 +671,7 @@ int ebeVn::exportObservables(const std::vector<double> &RAA, const std::map<unsi
     file_out << "#";
     file_out << std::fixed << std::setw(13) << "pT [GeV]" << " ";
     file_out << std::fixed << std::setw(13) <<     "R_AA" << " ";
-    for (unsigned int n=2; n<=4; n++) {
+    for (const auto& n : m_nListCummulants) {
         std::string vnStr;
         vnStr = "v_" + std::to_string(n) + "{2}";
         file_out << std::fixed << std::setw(13) << vnStr << " ";
@@ -674,7 +683,7 @@ int ebeVn::exportObservables(const std::vector<double> &RAA, const std::map<unsi
     for (size_t ipT=0; ipT<m_pTGrid.size(); ipT++) {
 		file_out << std::fixed << std::setw(14) << std::setprecision(10) << m_pTGrid[ipT] << " ";
 		file_out << std::fixed << std::setw(13) << std::setprecision(10) << 	 RAA[ipT] << " ";
-		for (unsigned int n=2; n<=4; n++) {
+		for (const auto& n : m_nListCummulants) {
 		    file_out << std::fixed << std::setw(13) << std::setprecision(10) <<  Vn2.at(n)[ipT] << " ";
             file_out << std::fixed << std::setw(13) << std::setprecision(10) <<  Vn4.at(n)[ipT] << " ";
         }

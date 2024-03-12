@@ -26,6 +26,7 @@ private:
     size_t m_eventN;
     std::map<size_t, double> m_M;
     std::vector<unsigned int> m_nList;
+    std::vector<unsigned int> m_nListCummulants;
     std::map<size_t, std::map<unsigned int, std::complex<double>>> m_Qn, m_normedQn;
     std::map<size_t, std::map<unsigned int, double>> m_Psin;
     int loadQnVectors();
