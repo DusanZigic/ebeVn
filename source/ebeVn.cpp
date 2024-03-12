@@ -81,7 +81,7 @@ ebeVn::ebeVn(int argc, const char *argv[])
 	if (buffer != 0) {
 		while(buffer != 0) {m_filter.push_back(buffer % 10); buffer /= 10;}
 	}
-	std::reverse(m_filter.begin(), m_filter.end());
+	std::sort(m_filter.begin(), m_filter.end());
 }
 
 ebeVn::~ebeVn() {}
